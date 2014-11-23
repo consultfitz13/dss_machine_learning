@@ -1,0 +1,172 @@
+---
+title: "Predicting exercise effectiveness from personal activity data"
+author: "John Fitzpatrick"
+date: "Saturday, November 22, 2014"
+output: html_document
+---
+
+## Executive Summary
+#### The purpose of this analysis is to build a model from personal activity data taken from
+#### devices such as Jawbone Up, Nike FuelBand, and Fitbit to help determine whether an
+#### individual is performing a dumbbell biceps curl effectively. The effectiveness of the
+#### model will be judged against a cross validation test and then finally applied to the
+#### testing data which is a separately stored dataset provided by the authors
+####
+#### The data for this analysis comes from http://groupware.les.inf.puc-rio.br/har
+
+**Download the training and test dataset**
+
+```{r download_data,echo=TRUE}
+
+dataDir <- "data"
+trainFileName <- paste(dataDir,"pml-training.csv",sep="/")  
+testFileName <- paste(dataDir,"pml-testing.csv",sep="/")  
+
+if (!file.exists(dataDir)) {
+  dir.create(dataDir)
+  
+  setInternet2(TRUE)  # set the R_WIN_INTERNET2 to TRUE  
+  train.ds.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(train.ds.url,trainFileName)
+
+  test.ds.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(test.ds.url,testFileName)
+  
+  dateDownloaded <- date()
+  dateDownloaded
+}
+
+
+```
+
+**Read in the training dataset**
+
+```{r read_training,echo=TRUE}
+training.ds <- read.csv(trainFileName,header=TRUE,stringsAsFactors=FALSE)
+
+```
+
+**Our goal is to build a model to predict on an unseen dataset the value of 
+the "classe" variable**  
+
+**This variable takes the following values**
+
+* A - exercise performed exactly according to the specification  
+* B - exercise performed throwing the elbows to the front  
+* C - exercise performed  lifting the dumbbell only halfway  
+* D - exercise performed lowering the dumbbell only halfway  
+* E - exercise performed throwing the hips to the front  
+
+**In looking through the dataset there are many columns that contain primarily NAs.**
+**These won't contribute much to describing the data or helping us make predictions about 
+unseen data. In addition, because we're trying to predict the class across all people and times,
+variables relating to those parameters will be dropped**
+```{r elim_poor_predictors,echo=TRUE}
+training.ds$classe <- as.factor(training.ds$classe)
+training.ds$X <- NULL
+training.ds$user_name <- NULL
+training.ds$new_window <- NULL
+training.ds$num_window <- NULL
+training.ds$raw_timestamp_part_1 <- NULL
+training.ds$raw_timestamp_part_2 <- NULL
+training.ds$cvtd_timestamp <- NULL
+
+# convert the remaining character columns to numeric
+# any values that can't be converted will be changed to NA
+for (i in which(sapply(training.ds, is.character))) {
+  training.ds[,i] <- as.numeric(training.ds[,i])    
+}
+
+# find columns that have greater than 40% NA
+remove.threshold <- 0.5
+total.rows <- nrow(training.ds)
+remove.cols <- c()
+
+
+for (i in 1:(ncol(training.ds) - 1)) {
+  na.count <- sum(is.na(training.ds[[i]]))
+  if ((na.count / total.rows) > remove.threshold) {
+    remove.cols <- append(remove.cols,i)
+  }
+}
+
+training.ds <- training.ds[,remove.cols * -1]
+
+
+```
+
+**Partition the training dataset so that we can cross validate our model once built**
+
+```{r partition_data,echo=TRUE}
+library(caret)
+inTrain <- createDataPartition(training.ds$classe, p = 3/4)[[1]]
+training <- training.ds[ inTrain,]
+cv <- training.ds[-inTrain,]
+
+
+```
+
+**Build a model using the random forest algorithm. Because there are so many variables
+preprocess the data using pca to reduce the number of factors needed to build the model**
+
+```{r create_model,echo=TRUE}
+
+set.seed(33833)
+modelFit <- train(training$classe ~ .,method="rf",preProcess=c("center","scale","pca"),data=training)
+
+
+```
+
+**Assess the accuracy of the model by predicting the class using the cross validation data**
+
+```{r cross_validate,echo=TRUE}
+cv.prediction <- predict(modelFit,cv)
+print(confusionMatrix(cv$classe,cv.prediction))
+```
+
+*The accuracy in the confusion matrix is 97% which means the out of sample error is 3%. The model should do a good job of predicting the class on the test dataset*
+
+
+**Load the test dataset and perform the same preprocessing on it as was done on the 
+training dataset**
+
+```{r read_test,echo=TRUE}
+testing.ds <- read.csv(testFileName,header=TRUE,stringsAsFactors=FALSE)
+
+```
+
+```{r elim_test_predictors,echo=TRUE}
+testing.ds$X <- NULL
+testing.ds$user_name <- NULL
+testing.ds$new_window <- NULL
+testing.ds$num_window <- NULL
+testing.ds$raw_timestamp_part_1 <- NULL
+testing.ds$raw_timestamp_part_2 <- NULL
+testing.ds$cvtd_timestamp <- NULL
+testing.ds$problem_id <- NULL
+
+# convert the remaining character columns to numeric
+# any values that can't be converted will be changed to NA
+for (i in which(sapply(testing.ds, is.character))) {
+  testing.ds[,i] <- as.numeric(testing.ds[,i])    
+}
+
+testing.ds <- testing.ds[,remove.cols * -1]
+
+
+```
+
+**Run the model against the test data to generate predictions**
+```{r predict_test,echo=TRUE}
+testing.prediction <- predict(modelFit,testing.ds)
+print(testing.prediction)
+
+```
+
+
+## Conclusion
+#### It is possible to predict the effectiveness of exercise based on personal activity data
+#### with a high degree of accuracy.  
+
+#### Based on the submission of these results against the actual values 19 out of 20 were
+#### predicted correctly
